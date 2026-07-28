@@ -1,0 +1,44 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+**/out/
+**/publish/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.userprefs
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# Node.js / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+**/dist/
+
+# Environment variables (secret)
+.env
+*.local
+*.secret
+
+# Docker volumes (optional)
+volumes/
+**/data/
+
+# Logs
+logs/
+*.log
+
+# EF Core migrations (if you prefer to keep them, uncomment)
+# **/Migrations/
+
+# Health checks / temp
+**/wwwroot/
