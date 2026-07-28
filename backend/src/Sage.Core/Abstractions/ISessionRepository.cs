@@ -8,4 +8,5 @@ public interface ISessionRepository
     Task<Session> CreateAsync(Session session, CancellationToken cancellationToken = default);
     Task AddMessageAsync(Message message, CancellationToken cancellationToken = default);
     Task<IEnumerable<Session>> ListAsync(int limit = 20, CancellationToken cancellationToken = default);
+    Task UpdateAsync(Session session, CancellationToken cancellationToken = default);
 }

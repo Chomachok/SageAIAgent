@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Api\\Sage.Api.csproj": {}
+    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Api\\Sage.Api.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Api\\Sage.Api.csproj": {
+    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Api\\Sage.Api.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Api\\Sage.Api.csproj",
+        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Api\\Sage.Api.csproj",
         "projectName": "Sage.Api",
-        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Api\\Sage.Api.csproj",
+        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Api\\Sage.Api.csproj",
         "packagesPath": "C:\\Users\\Windows\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Api\\obj\\",
+        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Api\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Windows\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -24,13 +24,14 @@
         },
         "frameworks": {
           "net8.0": {
+            "framework": "net8.0",
             "targetAlias": "net8.0",
             "projectReferences": {
-              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj": {
-                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj"
+              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj": {
+                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj"
               },
-              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj": {
-                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj"
+              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj": {
+                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj"
               }
             }
           }
@@ -49,8 +50,13 @@
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "dependencies": {
+            "DotNetEnv": {
+              "target": "Package",
+              "version": "[3.2.0, )"
+            },
             "Microsoft.AspNetCore.OpenApi": {
               "target": "Package",
               "version": "[8.0.27, )"
@@ -105,14 +111,14 @@
         }
       }
     },
-    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj": {
+    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj",
+        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj",
         "projectName": "Sage.Core",
-        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj",
+        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj",
         "packagesPath": "C:\\Users\\Windows\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\obj\\",
+        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Windows\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -125,6 +131,7 @@
         },
         "frameworks": {
           "net8.0": {
+            "framework": "net8.0",
             "targetAlias": "net8.0",
             "projectReferences": {}
           }
@@ -143,6 +150,7 @@
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "imports": [
             "net461",
@@ -178,14 +186,14 @@
         }
       }
     },
-    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj": {
+    "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj",
+        "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj",
         "projectName": "Sage.Infrastructure",
-        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj",
+        "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\Sage.Infrastructure.csproj",
         "packagesPath": "C:\\Users\\Windows\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Infrastructure\\obj\\",
+        "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Infrastructure\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Windows\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -198,10 +206,11 @@
         },
         "frameworks": {
           "net8.0": {
+            "framework": "net8.0",
             "targetAlias": "net8.0",
             "projectReferences": {
-              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj": {
-                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj"
+              "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj": {
+                "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj"
               }
             }
           }
@@ -220,8 +229,13 @@
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "dependencies": {
+            "Microsoft.EntityFrameworkCore": {
+              "target": "Package",
+              "version": "[8.0.26, )"
+            },
             "Microsoft.EntityFrameworkCore.Tools": {
               "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
               "suppressParent": "All",
@@ -239,6 +253,10 @@
             "Microsoft.SemanticKernel.Agents.Core": {
               "target": "Package",
               "version": "[1.78.0, )"
+            },
+            "Npgsql.EntityFrameworkCore.PostgreSQL": {
+              "target": "Package",
+              "version": "[8.0.11, )"
             }
           },
           "imports": [

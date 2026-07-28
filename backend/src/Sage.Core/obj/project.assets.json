@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj",
+      "projectUniqueName": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj",
       "projectName": "Sage.Core",
-      "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\Sage.Core.csproj",
+      "projectPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\Sage.Core.csproj",
       "packagesPath": "C:\\Users\\Windows\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\src\\Sage.Core\\obj\\",
+      "outputPath": "C:\\Users\\Windows\\Учёба\\SageAIAgent\\backend\\src\\Sage.Core\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Windows\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -30,6 +30,7 @@
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "projectReferences": {}
         }
@@ -48,6 +49,7 @@
     },
     "frameworks": {
       "net8.0": {
+        "framework": "net8.0",
         "targetAlias": "net8.0",
         "imports": [
           "net461",
