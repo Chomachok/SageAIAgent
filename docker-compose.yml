@@ -29,11 +29,11 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:80
-      # Переопределяем строку подключения через переменную окружения
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=sage;Username=postgres;Password=postgres
-      # Токен LLM передаём через переменную (читается из .env или окружения)
-      - LLM__ApiKey=${GITHUB_TOKEN}
-      # Можно переопределить и другие настройки, если нужно
+      - LLM__Provider=Groq
+      - LLM__ModelId=llama-3.3-70b-versatile
+      - LLM__Endpoint=https://api.groq.com/openai/v1
+      - LLM__ApiKey=${GROQ_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

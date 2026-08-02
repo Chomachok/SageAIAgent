@@ -6,7 +6,7 @@ namespace Sage.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ChatController(ICodingAgent agent) : ControllerBase
+public class ChatController(ICodingAgent agent, ILogger<ChatController> logger) : ControllerBase
 {
     [HttpPost]
     public async Task<IActionResult> Post([FromBody] ChatRequest request)
@@ -25,7 +25,8 @@ public class ChatController(ICodingAgent agent) : ControllerBase
         }
         catch (Exception ex)
         {
-            // Логирование (позже добавим)
+            logger.LogError(ex, "Error processing chat request for session {SessionId}, message: {Message}", 
+                request.SessionId, request.Message);
             return StatusCode(500, "An error occurred while processing your request.");
         }
     }
