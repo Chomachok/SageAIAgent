@@ -1,12 +1,12 @@
-using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Agents;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
+using Microsoft.Extensions.Options;
 using Sage.Core.Abstractions;
 using Sage.Core.Configuration;
 using Sage.Core.DTOs;
 using Sage.Core.Entities;
-using System.Text;
+using Sage.Infrastructure.Plugins;
 
 namespace Sage.Infrastructure.Agents;
 
@@ -22,10 +22,8 @@ public class SemanticKernelAgent : ICodingAgent
     {
         _sessionRepository = sessionRepository;
 
-        // Настройка Kernel
-        var builder = Kernel.CreateBuilder();
         var options = llmOptions.Value;
-
+        var builder = Kernel.CreateBuilder();
         builder.AddOpenAIChatCompletion(
             modelId: options.ModelId,
             endpoint: new Uri(options.Endpoint),
@@ -34,15 +32,26 @@ public class SemanticKernelAgent : ICodingAgent
 
         _kernel = builder.Build();
 
-        // Системный промпт (можно вынести в настройки)
-        _systemPrompt = @"
-Ты — Sage, мудрый наставник по программированию.
-Ты помогаешь писать код на любых языках: C#, Python, JavaScript, Go, Rust, SQL и других.
-Отвечай на том языке, на котором задан вопрос (русский, английский и т.д.).
-Давай примеры кода, объясняй их построчно.
-Если вопрос не относится к программированию, вежливо предложи вернуться к теме.
-Будь дружелюбным, терпеливым и вдохновляющим.
-";
+        // Регистрируем плагин FileSystem
+        var filePlugin = new FileSystemPlugin(
+            logger: null,
+            rootPath: "/app"
+        );
+        _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
+
+        _systemPrompt = """
+
+                        Ты — Sage, агент, который умеет читать файлы с помощью функции read_file.
+
+                        Жёсткие правила:
+                        1. Если пользователь просит прочитать файл — ты ОБЯЗАН вызвать функцию read_file.
+                        2. НЕ ПРЕДЛАГАЙ код для чтения файла, НЕ ОТВЕЧАЙ текстом.
+                        3. Используй результат функции и перескажи содержимое пользователю.
+                        4. Если функция вернула ошибку — сообщи её текст пользователю.
+
+                        Никогда не отказывайся от вызова функции.
+
+                        """;
     }
 
     public async Task<ChatResponse> AskAsync(ChatRequest request, CancellationToken cancellationToken = default)
@@ -61,12 +70,10 @@ public class SemanticKernelAgent : ICodingAgent
             await _sessionRepository.CreateAsync(session, cancellationToken);
         }
 
-        // 2. Формируем историю из БД (последние N сообщений, чтобы не перегружать контекст)
-        //    Здесь мы используем всё, что есть, но можно ограничить.
+        // 2. Формируем историю
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(_systemPrompt);
 
-        // Загружаем сообщения (они уже подгружены через Include в репозитории)
         foreach (var msg in session.Messages.OrderBy(m => m.CreatedAt))
         {
             if (msg.Role == "user")
@@ -75,28 +82,27 @@ public class SemanticKernelAgent : ICodingAgent
                 chatHistory.AddAssistantMessage(msg.Content);
         }
 
-        // Добавляем новый вопрос пользователя
         chatHistory.AddUserMessage(request.Message);
 
-        // 3. Создаём агента (ChatCompletionAgent) с текущим Kernel и историей
-        var agent = new ChatCompletionAgent
+        // 3. Настройки с автовызовом функций
+        var settings = new OpenAIPromptExecutionSettings
         {
-            Kernel = _kernel,
-            Instructions = _systemPrompt // можно переопределить, но мы уже добавили системное сообщение
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
         };
 
-        // 4. Получаем ответ (потоковый, но мы собираем в строку)
-        var responseStream = agent.InvokeAsync(chatHistory, cancellationToken: cancellationToken);
-        var fullResponse = new StringBuilder();
+        var chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
-        await foreach (var item in responseStream)
-        {
-            fullResponse.Append(item.Message?.Content ?? "");
-        }
+        // 4. Вызов с автоматическим вызовом функций
+        var result = await chatService.GetChatMessageContentAsync(
+            chatHistory,
+            settings,
+            _kernel,
+            cancellationToken
+        );
 
-        var answer = fullResponse.ToString();
+        var answer = result.Content ?? "No response from model.";
 
-        // 5. Сохраняем сообщения в БД
+        // 5. Сохраняем сообщения
         var userMessage = new Message
         {
             SessionId = session.Id,
@@ -112,18 +118,10 @@ public class SemanticKernelAgent : ICodingAgent
             Content = answer
         };
         await _sessionRepository.AddMessageAsync(assistantMessage, cancellationToken);
+
         session.UpdatedAt = DateTime.UtcNow;
         await _sessionRepository.UpdateAsync(session, cancellationToken);
 
-        // Обновляем время последнего изменения сессии
-        session.UpdatedAt = DateTime.UtcNow;
-        // Так как у нас нет метода Update, можно сделать через репозиторий, но мы не сохраняем сессию отдельно.
-        // Можно добавить метод UpdateSessionAsync в репозиторий, но пока просто сохраним через контекст (через Unit of Work).
-        // Но у нас нет Unit of Work, упростим: в репозитории есть только Create и AddMessage.
-        // Для обновления UpdatedAt нужно либо добавить метод, либо использовать DbContext напрямую.
-        // Пока оставим как есть, а позже добавим метод Update.
-
-        // Возвращаем ответ
         return new ChatResponse
         {
             SessionId = session.Id,
