@@ -30,14 +30,16 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=sage;Username=postgres;Password=postgres
-      - LLM__Provider=Groq
-      - LLM__ModelId=llama-3.3-70b-versatile
-      - LLM__Endpoint=https://api.groq.com/openai/v1
+      - LLM__Provider=${LLM__Provider}
+      - LLM__ModelId=${LLM__ModelId}
+      - LLM__Endpoint=${LLM__Endpoint}
       - LLM__ApiKey=${GROQ_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ./test-files:/app/test-files 
 
 volumes:
   postgres_data:
