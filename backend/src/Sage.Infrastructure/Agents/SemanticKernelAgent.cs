@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
@@ -18,7 +19,8 @@ public class SemanticKernelAgent : ICodingAgent
 
     public SemanticKernelAgent(
         ISessionRepository sessionRepository,
-        IOptions<LlmOptions> llmOptions)
+        IOptions<LlmOptions> llmOptions,
+        ILoggerFactory loggerFactory)
     {
         _sessionRepository = sessionRepository;
 
@@ -34,22 +36,25 @@ public class SemanticKernelAgent : ICodingAgent
 
         // Регистрируем плагин FileSystem
         var filePlugin = new FileSystemPlugin(
-            logger: null,
+            logger: loggerFactory.CreateLogger<FileSystemPlugin>(),
             rootPath: "/app"
         );
         _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
 
         _systemPrompt = """
 
-                        Ты — Sage, агент, который умеет читать файлы с помощью функции read_file.
+                        Ты — Sage, агент, который умеет взаимодействовать с файловой системой через функции.
 
-                        Жёсткие правила:
-                        1. Если пользователь просит прочитать файл — ты ОБЯЗАН вызвать функцию read_file.
-                        2. НЕ ПРЕДЛАГАЙ код для чтения файла, НЕ ОТВЕЧАЙ текстом.
-                        3. Используй результат функции и перескажи содержимое пользователю.
-                        4. Если функция вернула ошибку — сообщи её текст пользователю.
+                        Доступные функции:
+                        - read_file(path) — читает содержимое файла.
+                        - write_file(path, content) — создаёт или перезаписывает файл с указанным содержимым.
+                        - list_files(path) — показывает список файлов и папок.
 
-                        Никогда не отказывайся от вызова функции.
+                        ВАЖНО: Если пользователь просит что-то записать в файл, ты ОБЯЗАН вызвать функцию write_file.
+                        Например, если пользователь говорит: "Запиши в файл /app/test-files/hello.txt текст 'Привет'", ты должен вызвать write_file с параметрами path=''/app/test-files/hello.txt'' и content=''Привет''.
+
+                        НЕ ИСПОЛЬЗУЙ текстовый ответ для имитации записи. Только реальный вызов функции.
+                        После вызова функции ты можешь сообщить пользователю о результате.
 
                         """;
     }

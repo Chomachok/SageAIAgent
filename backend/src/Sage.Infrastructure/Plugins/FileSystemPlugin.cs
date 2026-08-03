@@ -68,4 +68,37 @@ public class FileSystemPlugin(ILogger<FileSystemPlugin>? logger = null, string? 
             return $"Error listing directory: {ex.Message}";
         }
     }
+    
+    [KernelFunction("write_file")]
+    [Description("Writes content to a file. Overwrites existing file.")]
+    public async Task<string> WriteFileAsync(
+        [Description("The full path to the file to write.")] string path,
+        [Description("The content to write to the file.")] string content)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var rootFull = Path.GetFullPath(_rootPath);
+            if (!fullPath.StartsWith(rootFull))
+            {
+                throw new UnauthorizedAccessException($"Access to path '{path}' is not allowed.");
+            }
+
+            // Создаём директорию, если её нет
+            var directory = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+            logger.LogInformation("Written file: {Path}, size: {Size} bytes", path, content.Length);
+            return $"File written successfully: {path}";
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error writing file: {Path}", path);
+            return $"Error writing file: {ex.Message}";
+        }
+    }
 }
