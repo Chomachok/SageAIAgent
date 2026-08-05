@@ -18,6 +18,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - sage-network                    
 
   api:
     build:
@@ -34,12 +36,36 @@ services:
       - LLM__ModelId=${LLM__ModelId}
       - LLM__Endpoint=${LLM__Endpoint}
       - LLM__ApiKey=${GROQ_API_KEY}
+      - PISTON_BASE_URL=http://piston:2000
     depends_on:
       postgres:
         condition: service_healthy
+      piston:
+        condition: service_started
     restart: unless-stopped
     volumes:
-      - ./test-files:/app/test-files 
+      - ./test-files:/app/test-files
+    networks:
+      - sage-network
+
+  piston:
+    image: ghcr.io/engineer-man/piston:latest
+    container_name: sage-piston
+    privileged: true                     
+    ports:
+      - "2000:2000"
+    volumes:
+      - ./data/piston/packages:/piston/packages   # кеш языков
+    tmpfs:
+      - /piston/jobs:exec,uid=1000,gid=1000,mode=711
+      - /tmp:exec
+    networks:
+      - sage-network
+    restart: unless-stopped
+
+networks:
+  sage-network:
+    driver: bridge
 
 volumes:
   postgres_data:

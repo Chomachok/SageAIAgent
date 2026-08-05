@@ -16,6 +16,7 @@ public class SemanticKernelAgent : ICodingAgent
     private readonly ISessionRepository _sessionRepository;
     private readonly Kernel _kernel;
     private readonly string _systemPrompt;
+    private const int MaxRetries = 5;
 
     public SemanticKernelAgent(
         ISessionRepository sessionRepository,
@@ -40,21 +41,20 @@ public class SemanticKernelAgent : ICodingAgent
             rootPath: "/app"
         );
         _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
+        
+        // Регистрируем плагин Sandbox
+        var sandboxLogger = loggerFactory.CreateLogger<SandboxPlugin>();
+        var sandboxPlugin = new SandboxPlugin(sandboxLogger);
+        _kernel.Plugins.AddFromObject(sandboxPlugin, "Sandbox");
 
         _systemPrompt = """
 
-                        Ты — Sage, агент, который умеет взаимодействовать с файловой системой через функции.
+                        Ты — Sage, агент с функциями:
+                        - read_file(path)
+                        - write_file(path, content)
+                        - execute_code(code, language)
 
-                        Доступные функции:
-                        - read_file(path) — читает содержимое файла.
-                        - write_file(path, content) — создаёт или перезаписывает файл с указанным содержимым.
-                        - list_files(path) — показывает список файлов и папок.
-
-                        ВАЖНО: Если пользователь просит что-то записать в файл, ты ОБЯЗАН вызвать функцию write_file.
-                        Например, если пользователь говорит: "Запиши в файл /app/test-files/hello.txt текст 'Привет'", ты должен вызвать write_file с параметрами path=''/app/test-files/hello.txt'' и content=''Привет''.
-
-                        НЕ ИСПОЛЬЗУЙ текстовый ответ для имитации записи. Только реальный вызов функции.
-                        После вызова функции ты можешь сообщить пользователю о результате.
+                        Всегда используй функции. Не давай текстовых примеров. Отвечай результатами функций.
 
                         """;
     }
@@ -79,7 +79,12 @@ public class SemanticKernelAgent : ICodingAgent
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(_systemPrompt);
 
-        foreach (var msg in session.Messages.OrderBy(m => m.CreatedAt))
+        var recentMessages = session.Messages
+            .OrderBy(m => m.CreatedAt)
+            .TakeLast(3)
+            .ToList();
+
+        foreach (var msg in recentMessages)
         {
             if (msg.Role == "user")
                 chatHistory.AddUserMessage(msg.Content);
@@ -92,18 +97,36 @@ public class SemanticKernelAgent : ICodingAgent
         // 3. Настройки с автовызовом функций
         var settings = new OpenAIPromptExecutionSettings
         {
-            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions,
+            MaxTokens = 500
         };
 
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
-        // 4. Вызов с автоматическим вызовом функций
-        var result = await chatService.GetChatMessageContentAsync(
-            chatHistory,
-            settings,
-            _kernel,
-            cancellationToken
-        );
+        var attempt = 0;
+        ChatMessageContent result;
+
+        while (true)
+        {
+            try
+            {
+                // 4. Вызов с автоматическим вызовом функций
+                result = await chatService.GetChatMessageContentAsync(
+                    chatHistory,
+                    settings,
+                    _kernel,
+                    cancellationToken
+                );
+                break;
+            }
+            catch (HttpOperationException ex) when (ex.Message.Contains("429"))
+            {
+                attempt++;
+                if (attempt > MaxRetries) throw;
+                var delayMs = (int)Math.Pow(2, attempt) * 1000;
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
 
         var answer = result.Content ?? "No response from model.";
 
