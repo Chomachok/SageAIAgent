@@ -33,12 +33,9 @@ public class SemanticKernelAgent : ICodingAgent
         );
 
         _kernel = builder.Build();
-
-        // Регистрируем плагин FileSystem
-        var filePlugin = new FileSystemPlugin(
-            logger: loggerFactory.CreateLogger<FileSystemPlugin>(),
-            rootPath: "/app"
-        );
+        
+        var fileLogger = loggerFactory.CreateLogger<FileSystemPlugin>();
+        var filePlugin = new FileSystemPlugin(fileLogger, options.RootPath);
         _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
 
         _systemPrompt = """
@@ -61,8 +58,7 @@ public class SemanticKernelAgent : ICodingAgent
 
     public async Task<ChatResponse> AskAsync(ChatRequest request, CancellationToken cancellationToken = default)
     {
-        // 1. Получаем или создаём сессию
-        Session session;
+        Session? session;
         if (request.SessionId.HasValue)
         {
             session = await _sessionRepository.GetByIdAsync(request.SessionId.Value, cancellationToken);
@@ -75,7 +71,6 @@ public class SemanticKernelAgent : ICodingAgent
             await _sessionRepository.CreateAsync(session, cancellationToken);
         }
 
-        // 2. Формируем историю
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(_systemPrompt);
 
@@ -89,7 +84,6 @@ public class SemanticKernelAgent : ICodingAgent
 
         chatHistory.AddUserMessage(request.Message);
 
-        // 3. Настройки с автовызовом функций
         var settings = new OpenAIPromptExecutionSettings
         {
             ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
@@ -97,7 +91,6 @@ public class SemanticKernelAgent : ICodingAgent
 
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
-        // 4. Вызов с автоматическим вызовом функций
         var result = await chatService.GetChatMessageContentAsync(
             chatHistory,
             settings,
@@ -107,7 +100,6 @@ public class SemanticKernelAgent : ICodingAgent
 
         var answer = result.Content ?? "No response from model.";
 
-        // 5. Сохраняем сообщения
         var userMessage = new Message
         {
             SessionId = session.Id,

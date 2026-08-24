@@ -6,4 +6,5 @@ public class LlmOptions
     public string ModelId { get; set; } = "codestral-2501";
     public string Endpoint { get; set; } = "https://models.inference.ai.azure.com";
     public string ApiKey { get; set; } = string.Empty;
+    public string RootPath { get; set; } = ".";
 }

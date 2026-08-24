@@ -1,8 +1,0 @@
-{
-  "name": "Sage",
-  "version": "1.0.0",
-  "settings": {
-    "logLevel": "Information",
-    "maxTokens": 4096
-  }
-}

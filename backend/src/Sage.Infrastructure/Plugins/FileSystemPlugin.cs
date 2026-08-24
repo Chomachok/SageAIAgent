@@ -5,9 +5,9 @@ using Microsoft.SemanticKernel;
 
 namespace Sage.Infrastructure.Plugins;
 
-public class FileSystemPlugin(ILogger<FileSystemPlugin>? logger = null, string? rootPath = null)
+public class FileSystemPlugin(ILogger<FileSystemPlugin>? logger, string? rootPath = null)
 {
-    private readonly string _rootPath = rootPath;
+    private readonly string _rootPath = rootPath ?? throw new ArgumentNullException(nameof(rootPath));
 
     [KernelFunction("read_file")]
     [Description("Reads the contents of a file and returns it as a string.")]
@@ -92,12 +92,12 @@ public class FileSystemPlugin(ILogger<FileSystemPlugin>? logger = null, string? 
             }
 
             await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
-            logger.LogInformation("Written file: {Path}, size: {Size} bytes", path, content.Length);
+            logger?.LogInformation("Written file: {Path}, size: {Size} bytes", path, content.Length);
             return $"File written successfully: {path}";
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error writing file: {Path}", path);
+            logger?.LogError(ex, "Error writing file: {Path}", path);
             return $"Error writing file: {ex.Message}";
         }
     }

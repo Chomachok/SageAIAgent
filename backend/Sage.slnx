@@ -1,6 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Sage.Api/Sage.Api.csproj" />
+    <Project Path="src/Sage.CLI/Sage.CLI.csproj" />
     <Project Path="src/Sage.Core/Sage.Core.csproj" />
     <Project Path="src/Sage.Infrastructure/Sage.Infrastructure.csproj" />
   </Folder>
