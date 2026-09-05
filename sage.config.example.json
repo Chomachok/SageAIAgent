@@ -1,0 +1,10 @@
+{
+  "Provider": "your_provider",
+  "ModelId": "llm_model",
+  "Endpoint": "provider_endpoint",
+  "ApiKey": "api_key",
+  "RootPath": ".",
+  "MaxTokens": 500,
+  "Temperature": 0.1,
+  "MaxHistoryMessages": 3
+}

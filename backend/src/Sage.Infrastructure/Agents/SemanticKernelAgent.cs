@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
-using Microsoft.Extensions.Options;
 using Sage.Core.Abstractions;
 using Sage.Core.Configuration;
 using Sage.Core.DTOs;
@@ -16,44 +15,50 @@ public class SemanticKernelAgent : ICodingAgent
     private readonly ISessionRepository _sessionRepository;
     private readonly Kernel _kernel;
     private readonly string _systemPrompt;
+    private readonly int _maxHistoryMessages;
+    private readonly int _maxTokens;
+    private readonly double _temperature;
+    private const int MaxRetries = 5;
+    private readonly ILogger<SemanticKernelAgent> _logger;
 
     public SemanticKernelAgent(
         ISessionRepository sessionRepository,
-        IOptions<LlmOptions> llmOptions,
+        LlmConfig llmConfig,           
         ILoggerFactory loggerFactory)
     {
         _sessionRepository = sessionRepository;
+        _logger = loggerFactory.CreateLogger<SemanticKernelAgent>();
 
-        var options = llmOptions.Value;
+        _maxHistoryMessages = llmConfig.MaxHistoryMessages;
+        _maxTokens = llmConfig.MaxTokens;
+        _temperature = llmConfig.Temperature;
+
+        if (string.IsNullOrWhiteSpace(llmConfig.Endpoint))
+            throw new InvalidOperationException("Endpoint is not configured in sage.config.json.");
+        if (string.IsNullOrWhiteSpace(llmConfig.ApiKey))
+            throw new InvalidOperationException("ApiKey is not configured in sage.config.json.");
+        if (string.IsNullOrWhiteSpace(llmConfig.ModelId))
+            throw new InvalidOperationException("ModelId is not configured in sage.config.json.");
+
         var builder = Kernel.CreateBuilder();
         builder.AddOpenAIChatCompletion(
-            modelId: options.ModelId,
-            endpoint: new Uri(options.Endpoint),
-            apiKey: options.ApiKey
+            modelId: llmConfig.ModelId,
+            endpoint: new Uri(llmConfig.Endpoint),
+            apiKey: llmConfig.ApiKey
         );
 
         _kernel = builder.Build();
         
         var fileLogger = loggerFactory.CreateLogger<FileSystemPlugin>();
-        var filePlugin = new FileSystemPlugin(fileLogger, options.RootPath);
+        var filePlugin = new FileSystemPlugin(fileLogger, llmConfig.RootPath);
         _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
 
         _systemPrompt = """
-
-                        Ты — Sage, агент, который умеет взаимодействовать с файловой системой через функции.
-
-                        Доступные функции:
-                        - read_file(path) — читает содержимое файла.
-                        - write_file(path, content) — создаёт или перезаписывает файл с указанным содержимым.
-                        - list_files(path) — показывает список файлов и папок.
-
-                        ВАЖНО: Если пользователь просит что-то записать в файл, ты ОБЯЗАН вызвать функцию write_file.
-                        Например, если пользователь говорит: "Запиши в файл /app/test-files/hello.txt текст 'Привет'", ты должен вызвать write_file с параметрами path=''/app/test-files/hello.txt'' и content=''Привет''.
-
-                        НЕ ИСПОЛЬЗУЙ текстовый ответ для имитации записи. Только реальный вызов функции.
-                        После вызова функции ты можешь сообщить пользователю о результате.
-
-                        """;
+            Ты — Sage, агент с функциями:
+            read_file, write_file, list_files.
+            Если пользователь просит что-то с файлами — вызывай функцию. Не объясняй. 
+            Отвечай только результатом функции.
+            """;
     }
 
     public async Task<ChatResponse> AskAsync(ChatRequest request, CancellationToken cancellationToken = default)
@@ -67,14 +72,19 @@ public class SemanticKernelAgent : ICodingAgent
         }
         else
         {
-            session = new Session { Title = request.Message.Length > 50 ? request.Message[..50] : request.Message };
+            session = new Session { Title = request.Message.Length > 30 ? request.Message[..30] : request.Message };
             await _sessionRepository.CreateAsync(session, cancellationToken);
         }
 
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(_systemPrompt);
 
-        foreach (var msg in session.Messages.OrderBy(m => m.CreatedAt))
+        var lastMessages = session.Messages
+            .OrderBy(m => m.CreatedAt)
+            .TakeLast(_maxHistoryMessages)
+            .ToList();
+
+        foreach (var msg in lastMessages)
         {
             if (msg.Role == "user")
                 chatHistory.AddUserMessage(msg.Content);
@@ -86,19 +96,43 @@ public class SemanticKernelAgent : ICodingAgent
 
         var settings = new OpenAIPromptExecutionSettings
         {
-            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions,
+            MaxTokens = _maxTokens > 0 ? _maxTokens : null,
+            Temperature = _temperature,
+            TopP = 0.9,
+            FrequencyPenalty = 0.0,
+            PresencePenalty = 0.0
         };
 
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
-        var result = await chatService.GetChatMessageContentAsync(
-            chatHistory,
-            settings,
-            _kernel,
-            cancellationToken
-        );
+        var attempt = 0;
+        string? answer = null;
 
-        var answer = result.Content ?? "No response from model.";
+        while (attempt < MaxRetries)
+        {
+            try
+            {
+                var result = await chatService.GetChatMessageContentAsync(
+                    chatHistory,
+                    settings,
+                    _kernel,
+                    cancellationToken
+                );
+                answer = result.Content ?? "No response.";
+                break;
+            }
+            catch (HttpOperationException ex) when (ex.Message.Contains("429"))
+            {
+                attempt++;
+                var delay = (int)Math.Pow(2, attempt) * 1000;
+                _logger.LogWarning($"Rate limit (429). Retry {attempt}/{MaxRetries} in {delay}ms");
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        if (answer == null)
+            throw new Exception("Rate limit exceeded after retries.");
 
         var userMessage = new Message
         {

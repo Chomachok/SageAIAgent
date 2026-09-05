@@ -4,6 +4,9 @@
 **/out/
 **/publish/
 
+# NuGet packages (локальные пакеты)
+**/nupkg/
+
 # User-specific files
 *.user
 *.userosscache
@@ -42,3 +45,16 @@ logs/
 
 # Health checks / temp
 **/wwwroot/
+
+# Sage configuration (contains API keys)
+sage.config.json
+# Allow example config (no secrets)
+!sage.config.example
+
+appsettings.json
+# Разрешить пример (без секретов)
+!appsettings.example.json
+
+# Документация (если она генерируется автоматически) — обычно не игнорируется
+# но если это временные файлы, можно добавить:
+# docs/_build/

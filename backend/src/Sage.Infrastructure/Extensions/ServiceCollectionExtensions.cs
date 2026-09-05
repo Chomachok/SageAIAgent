@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Sage.Core.Abstractions;
 using Sage.Core.Configuration;
 using Sage.Infrastructure.Agents;
@@ -11,24 +11,22 @@ namespace Sage.Infrastructure.Extensions;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddInfrastructure(
+    public static void AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        LlmConfig llmConfig,
+        string? connectionString = null)
     {
-        // Конфигурация LLM
-        services.Configure<LlmOptions>(configuration.GetSection("LLM"));
+        services.AddSingleton(llmConfig);
+        services.AddSingleton<IOptions<LlmConfig>>(sp =>
+            Options.Create(sp.GetRequiredService<LlmConfig>()));
 
-        // База данных
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
-        services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString));
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            services.AddDbContext<AppDbContext>(options =>
+                options.UseNpgsql(connectionString));
+        }
 
-        // Репозитории
         services.AddScoped<ISessionRepository, SessionRepository>();
-
-        // Агент
         services.AddScoped<ICodingAgent, SemanticKernelAgent>();
-
-        return services;
     }
 }
