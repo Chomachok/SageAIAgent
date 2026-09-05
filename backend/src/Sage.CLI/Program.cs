@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sage.Core.Abstractions;
@@ -15,8 +16,7 @@ var llmConfig = ConfigLoader.LoadConfig(args);
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
-        if (llmConfig != null)
-            services.AddInfrastructure(llmConfig, context.Configuration.GetConnectionString("DefaultConnection"));
+        services.AddInfrastructure(llmConfig, context.Configuration.GetConnectionString("DefaultConnection"));
         services.AddScoped<ISessionRepository, InMemorySessionRepository>();
         services.AddLogging(builder =>
         {
@@ -30,12 +30,27 @@ var host = Host.CreateDefaultBuilder(args)
 var agent = host.Services.GetRequiredService<ICodingAgent>();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
 
+// ─── Режим одного запроса ───
 if (args.Length > 0)
 {
     var query = string.Join(" ", args);
     try
     {
-        var response = await agent.AskAsync(new ChatRequest { SessionId = null, Message = query });
+        var stopwatch = Stopwatch.StartNew();
+        var response = await AnsiConsole.Status()
+            .StartAsync("🧠 Sage is thinking...", async ctx =>
+            {
+                ctx.Spinner(Spinner.Known.Dots);
+                ctx.SpinnerStyle(Style.Parse("cyan"));
+                return await agent.AskAsync(new ChatRequest { SessionId = null, Message = query });
+            });
+        stopwatch.Stop();
+
+        var elapsed = stopwatch.Elapsed;
+        string timeStr = elapsed.TotalSeconds < 1 
+            ? $"{elapsed.TotalMilliseconds:F0} ms" 
+            : $"{elapsed.TotalSeconds:F2} s";
+        Console.WriteLine($"⏱️ Time: {timeStr}");
         Console.WriteLine(response.Message);
     }
     catch (Exception ex)
@@ -46,7 +61,7 @@ if (args.Length > 0)
     return;
 }
 
-Console.WriteLine($"🧙 Sage v0.1.0 (working dir: {Directory.GetCurrentDirectory()})");
+Console.WriteLine($"🧙 Sage (working dir: {Directory.GetCurrentDirectory()})");
 Console.WriteLine("Type /exit to quit, /clear to reset conversation.");
 
 string? sessionId = null;
@@ -75,8 +90,24 @@ while (true)
             SessionId = sessionId != null ? Guid.Parse(sessionId) : null,
             Message = input
         };
-        var response = await agent.AskAsync(request);
+
+        var stopwatch = Stopwatch.StartNew();
+        var response = await AnsiConsole.Status()
+            .StartAsync("🧠 Sage is thinking...", async ctx =>
+            {
+                ctx.Spinner(Spinner.Known.Dots);
+                ctx.SpinnerStyle(Style.Parse("cyan"));
+                return await agent.AskAsync(request);
+            });
+        stopwatch.Stop();
+
         sessionId = response.SessionId.ToString();
+
+        var elapsed = stopwatch.Elapsed;
+        string timeStr = elapsed.TotalSeconds < 1 
+            ? $"{elapsed.TotalMilliseconds:F0} ms" 
+            : $"{elapsed.TotalSeconds:F2} s";
+        Console.WriteLine($"⏱️ Time: {timeStr}");
 
         var mdRenderer = new MarkdownRenderer();
         var rendered = mdRenderer.Render(response.Message);
