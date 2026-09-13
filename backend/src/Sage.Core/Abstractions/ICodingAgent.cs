@@ -1,11 +1,11 @@
 ﻿using Sage.Core.DTOs;
+using Sage.Core.Events;
 
 namespace Sage.Core.Abstractions;
 
 public interface ICodingAgent
 {
-    Task<ChatResponse> AskAsync(
+    IAsyncEnumerable<AgentEvent> AskStreamingAsync(
         ChatRequest request,
-        CancellationToken cancellationToken = default
-    );
+        CancellationToken cancellationToken = default);
 }

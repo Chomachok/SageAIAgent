@@ -1,125 +1,155 @@
 ﻿using System.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sage.Core.Abstractions;
 using Sage.Core.DTOs;
+using Sage.Core.Events;
 using Sage.Infrastructure.Extensions;
-using Sage.CLI.Repositories;
-using Spectre.Console;
-using BoxOfYellow.ConsoleMarkdownRenderer.Spectre;
-using Microsoft.Extensions.Configuration;
 using Sage.CLI;
+using Sage.CLI.Repositories;
+using Sage.CLI.Rendering;
+using Sage.CLI.UI;
+using Sage.CLI.UI.Components;
+using Spectre.Console;
 
 var llmConfig = ConfigLoader.LoadConfig(args);
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
-        services.AddInfrastructure(llmConfig, context.Configuration.GetConnectionString("DefaultConnection"));
+        services.AddInfrastructure(llmConfig,
+            context.Configuration.GetConnectionString("DefaultConnection"));
         services.AddScoped<ISessionRepository, InMemorySessionRepository>();
         services.AddLogging(builder =>
         {
             builder.ClearProviders();
-            builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Warning);
         });
     })
     .Build();
 
 var agent = host.Services.GetRequiredService<ICodingAgent>();
-var logger = host.Services.GetRequiredService<ILogger<Program>>();
 
-// ─── Режим одного запроса ───
+var statusBar = new StatusBar(
+    model: llmConfig?.ModelId ?? "unknown",
+    mode: "Auto",
+    workingDir: Directory.GetCurrentDirectory());
+var toolPanel = new ToolPanel();
+var chatStream = new ChatStream();
+var appShell = new AppShell(statusBar, toolPanel, chatStream);
+var composer = new Composer();
+var markdownRenderer = new SpectreMarkdownRenderer();
+
+// ─── Single-shot mode ───
 if (args.Length > 0)
 {
     var query = string.Join(" ", args);
     try
     {
         var stopwatch = Stopwatch.StartNew();
-        var response = await AnsiConsole.Status()
-            .StartAsync("🧠 Sage is thinking...", async ctx =>
+        var fullResponse = "";
+        string? errorMessage = null;
+
+        await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .SpinnerStyle(Style.Parse("cyan"))
+            .StartAsync("Sage is thinking...", async ctx =>
             {
-                ctx.Spinner(Spinner.Known.Dots);
-                ctx.SpinnerStyle(Style.Parse("cyan"));
-                return await agent.AskAsync(new ChatRequest { SessionId = null, Message = query });
+                try
+                {
+                    await foreach (var evt in agent.AskStreamingAsync(
+                        new ChatRequest { SessionId = null, Message = query }))
+                    {
+                        switch (evt)
+                        {
+                            case TextChunkReceived chunk:
+                                fullResponse += chunk.Text;
+                                break;
+                            case StatusEvent status:
+                                ctx.Status($"{status.Message}");
+                                break;
+                            case ToolCallStarted started:
+                                ctx.Status($"{started.ToolName}...");
+                                break;
+                            case AgentFailed failed:
+                                errorMessage = failed.Reason;
+                                break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errorMessage = ex.Message;
+                }
             });
+
         stopwatch.Stop();
 
-        var elapsed = stopwatch.Elapsed;
-        string timeStr = elapsed.TotalSeconds < 1 
-            ? $"{elapsed.TotalMilliseconds:F0} ms" 
-            : $"{elapsed.TotalSeconds:F2} s";
-        Console.WriteLine($"⏱️ Time: {timeStr}");
-        Console.WriteLine(response.Message);
+        if (!string.IsNullOrEmpty(errorMessage))
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(new Panel(new Markup($"[red]{Markup.Escape(errorMessage)}[/]"))
+                .Header("[red] ✗ Error [/]")
+                .BorderColor(Color.Red)
+                .RoundedBorder()
+                .Expand());
+            return;
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[grey]⏱ Time: {stopwatch.Elapsed.TotalSeconds:F2}s[/]");
+        AnsiConsole.WriteLine();
+        markdownRenderer.Render(fullResponse);
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Error");
-        Console.WriteLine($"❌ Error: {ex.Message}");
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Panel(new Markup($"[red]{Markup.Escape(ex.Message)}[/]"))
+            .Header("[red] ✗ Error [/]")
+            .BorderColor(Color.Red)
+            .RoundedBorder()
+            .Expand());
     }
     return;
 }
 
-Console.WriteLine($"🧙 Sage (working dir: {Directory.GetCurrentDirectory()})");
-Console.WriteLine("Type /exit to quit, /clear to reset conversation.");
+// ─── Interactive mode ───
+AnsiConsole.Clear();
+AnsiConsole.Write(new FigletText("Sage").Color(Color.Cyan1).LeftJustified());
+AnsiConsole.MarkupLine("[grey]AI coding assistant. Type [cyan]/help[/] for commands.[/]");
+AnsiConsole.WriteLine();
 
-string? sessionId = null;
+Guid? sessionId = null;
+
 while (true)
 {
-    Console.Write("\n> ");
-    var input = Console.ReadLine();
-    if (string.IsNullOrWhiteSpace(input)) continue;
+    var input = composer.Prompt();
+    if (input == null) break;
 
-    if (input == "/exit")
+    if (input.Equals("/exit", StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine("Goodbye!");
+        AnsiConsole.MarkupLine("[grey]Goodbye![/]");
         break;
     }
-    if (input == "/clear")
+    if (input.Equals("/clear", StringComparison.OrdinalIgnoreCase))
     {
         sessionId = null;
-        Console.WriteLine("Conversation cleared.");
+        appShell.ClearChat();
+        AnsiConsole.Clear();
+        AnsiConsole.MarkupLine("[grey]Conversation cleared.[/]");
         continue;
     }
-
-    try
+    if (input.Equals("/help", StringComparison.OrdinalIgnoreCase))
     {
-        var request = new ChatRequest
-        {
-            SessionId = sessionId != null ? Guid.Parse(sessionId) : null,
-            Message = input
-        };
-
-        var stopwatch = Stopwatch.StartNew();
-        var response = await AnsiConsole.Status()
-            .StartAsync("🧠 Sage is thinking...", async ctx =>
-            {
-                ctx.Spinner(Spinner.Known.Dots);
-                ctx.SpinnerStyle(Style.Parse("cyan"));
-                return await agent.AskAsync(request);
-            });
-        stopwatch.Stop();
-
-        sessionId = response.SessionId.ToString();
-
-        var elapsed = stopwatch.Elapsed;
-        string timeStr = elapsed.TotalSeconds < 1 
-            ? $"{elapsed.TotalMilliseconds:F0} ms" 
-            : $"{elapsed.TotalSeconds:F2} s";
-        Console.WriteLine($"⏱️ Time: {timeStr}");
-
-        var mdRenderer = new MarkdownRenderer();
-        var rendered = mdRenderer.Render(response.Message);
-        if (rendered.Root != null)
-            AnsiConsole.Write(rendered.Root);
-        else
-            Console.WriteLine(response.Message);
-        Console.WriteLine();
+        AnsiConsole.MarkupLine("[bold]Commands:[/]");
+        AnsiConsole.MarkupLine("  [cyan]/exit[/]   — quit");
+        AnsiConsole.MarkupLine("  [cyan]/clear[/]  — reset conversation");
+        AnsiConsole.MarkupLine("  [cyan]/help[/]   — show this help");
+        continue;
     }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error");
-        Console.WriteLine($"❌ Error: {ex.Message}");
-    }
+    if (string.IsNullOrWhiteSpace(input)) continue;
+
+    sessionId = await appShell.RunQueryAsync(agent, sessionId, input);
 }

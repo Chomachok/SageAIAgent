@@ -1,3 +1,7 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -6,6 +10,7 @@ using Sage.Core.Abstractions;
 using Sage.Core.Configuration;
 using Sage.Core.DTOs;
 using Sage.Core.Entities;
+using Sage.Core.Events;
 using Sage.Infrastructure.Plugins;
 
 namespace Sage.Infrastructure.Agents;
@@ -61,18 +66,22 @@ public class SemanticKernelAgent : ICodingAgent
             """;
     }
 
-    public async Task<ChatResponse> AskAsync(ChatRequest request, CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<AgentEvent> AskStreamingAsync(
+        ChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        Session? session;
+        Session session;
         if (request.SessionId.HasValue)
         {
-            session = await _sessionRepository.GetByIdAsync(request.SessionId.Value, cancellationToken);
-            if (session == null)
-                throw new ArgumentException("Session not found");
+            session = await _sessionRepository.GetByIdAsync(request.SessionId.Value, cancellationToken)
+                      ?? throw new ArgumentException("Session not found");
         }
         else
         {
-            session = new Session { Title = request.Message.Length > 30 ? request.Message[..30] : request.Message };
+            session = new Session
+            {
+                Title = request.Message.Length > 30 ? request.Message[..30] : request.Message
+            };
             await _sessionRepository.CreateAsync(session, cancellationToken);
         }
 
@@ -81,17 +90,13 @@ public class SemanticKernelAgent : ICodingAgent
 
         var lastMessages = session.Messages
             .OrderBy(m => m.CreatedAt)
-            .TakeLast(_maxHistoryMessages)
-            .ToList();
+            .TakeLast(_maxHistoryMessages);
 
         foreach (var msg in lastMessages)
         {
-            if (msg.Role == "user")
-                chatHistory.AddUserMessage(msg.Content);
-            else if (msg.Role == "assistant")
-                chatHistory.AddAssistantMessage(msg.Content);
+            if (msg.Role == "user") chatHistory.AddUserMessage(msg.Content);
+            else if (msg.Role == "assistant") chatHistory.AddAssistantMessage(msg.Content);
         }
-
         chatHistory.AddUserMessage(request.Message);
 
         var settings = new OpenAIPromptExecutionSettings
@@ -105,58 +110,83 @@ public class SemanticKernelAgent : ICodingAgent
         };
 
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+        var answerBuilder = new StringBuilder();
+        var stopwatch = Stopwatch.StartNew();
 
-        var attempt = 0;
-        string? answer = null;
+        var channel = Channel.CreateUnbounded<AgentEvent>();
 
-        while (attempt < MaxRetries)
+        _ = Task.Run(async () =>
         {
-            try
+            for (var attempt = 0; attempt < MaxRetries; attempt++)
             {
-                var result = await chatService.GetChatMessageContentAsync(
-                    chatHistory,
-                    settings,
-                    _kernel,
-                    cancellationToken
-                );
-                answer = result.Content ?? "No response.";
-                break;
+                try
+                {
+                    await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(
+                        chatHistory, settings, _kernel, cancellationToken))
+                    {
+                        if (string.IsNullOrEmpty(chunk.Content)) continue;
+
+                        answerBuilder.Append(chunk.Content);
+                        await channel.Writer.WriteAsync(
+                            new TextChunkReceived(chunk.Content), cancellationToken);
+                    }
+
+                    channel.Writer.Complete();
+                    return;
+                }
+                catch (HttpOperationException ex) when (ex.Message.Contains("429"))
+                {
+                    var delay = (int)Math.Pow(2, attempt + 1) * 1000;
+                    _logger.LogWarning(
+                        "Rate limit (429). Retry {Attempt}/{Max} in {Delay}ms",
+                        attempt + 1, MaxRetries, delay);
+
+                    await channel.Writer.WriteAsync(
+                        new StatusEvent($"⏳ Retry {attempt + 1}/{MaxRetries} in {delay / 1000}s..."),
+                        cancellationToken);
+
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Streaming failed");
+                    await channel.Writer.WriteAsync(new AgentFailed(ex.Message), cancellationToken);
+                    channel.Writer.Complete();
+                    return;
+                }
             }
-            catch (HttpOperationException ex) when (ex.Message.Contains("429"))
-            {
-                attempt++;
-                var delay = (int)Math.Pow(2, attempt) * 1000;
-                _logger.LogWarning($"Rate limit (429). Retry {attempt}/{MaxRetries} in {delay}ms");
-                await Task.Delay(delay, cancellationToken);
-            }
+
+            await channel.Writer.WriteAsync(
+                new AgentFailed("Rate limit exceeded after retries."), cancellationToken);
+            channel.Writer.Complete();
+        }, cancellationToken);
+
+        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return evt;
         }
 
-        if (answer == null)
-            throw new Exception("Rate limit exceeded after retries.");
+        stopwatch.Stop();
 
-        var userMessage = new Message
+        var answer = answerBuilder.ToString();
+
+        await _sessionRepository.AddMessageAsync(new Message
         {
             SessionId = session.Id,
             Role = "user",
             Content = request.Message
-        };
-        await _sessionRepository.AddMessageAsync(userMessage, cancellationToken);
+        }, cancellationToken);
 
-        var assistantMessage = new Message
+        await _sessionRepository.AddMessageAsync(new Message
         {
             SessionId = session.Id,
             Role = "assistant",
             Content = answer
-        };
-        await _sessionRepository.AddMessageAsync(assistantMessage, cancellationToken);
+        }, cancellationToken);
 
         session.UpdatedAt = DateTime.UtcNow;
         await _sessionRepository.UpdateAsync(session, cancellationToken);
 
-        return new ChatResponse
-        {
-            SessionId = session.Id,
-            Message = answer
-        };
+        yield return new AgentCompleted(session.Id, answer, stopwatch.Elapsed);
     }
 }
