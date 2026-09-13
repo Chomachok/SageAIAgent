@@ -1,7 +1,7 @@
 using Sage.Core.Abstractions;
 using Sage.Core.Entities;
 
-namespace Sage.CLI.Repositories;
+namespace Sage.Infrastructure.Repositories;
 
 public class InMemorySessionRepository : ISessionRepository
 {

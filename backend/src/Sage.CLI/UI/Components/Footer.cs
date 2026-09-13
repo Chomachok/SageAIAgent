@@ -17,9 +17,6 @@ public class Footer
         return result;
     }
 
-    /// <summary>
-    /// Service status message — light grey (brighter than dim).
-    /// </summary>
     public static void ShowStatus(string message)
     {
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(message)}[/]");

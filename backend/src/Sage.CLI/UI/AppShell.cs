@@ -9,30 +9,15 @@ using Spectre.Console.Rendering;
 
 namespace Sage.CLI.UI;
 
-public class AppShell
+public class AppShell(StatusBar statusBar, ToolPanel toolPanel, ChatStream chatStream)
 {
-    private readonly StatusBar _statusBar;
-    private readonly ToolPanel _toolPanel;
-    private readonly ChatStream _chatStream;
-    private readonly SpectreMarkdownRenderer _markdownRenderer;
+    private readonly SpectreMarkdownRenderer _markdownRenderer = new();
     private string _currentStream = "";
 
-    public AppShell(StatusBar statusBar, ToolPanel toolPanel, ChatStream chatStream)
-    {
-        _statusBar = statusBar;
-        _toolPanel = toolPanel;
-        _chatStream = chatStream;
-        _markdownRenderer = new SpectreMarkdownRenderer();
-    }
+    public void AddUserMessage(string message) => chatStream.AddUser(message);
+    public void AddAssistantMessage(string message) => chatStream.AddAssistant(message);
+    public void ClearChat() => chatStream.Clear();
 
-    public void AddUserMessage(string message) => _chatStream.AddUser(message);
-    public void AddAssistantMessage(string message) => _chatStream.AddAssistant(message);
-    public void ClearChat() => _chatStream.Clear();
-
-    /// <summary>
-    /// Запускает запрос к агенту с живым отображением (спиннер + стриминг).
-    /// Ошибки показываются ПОСЛЕ Live-цикла, чтобы пользователь мог их прочитать.
-    /// </summary>
     public async Task<Guid?> RunQueryAsync(
         ICodingAgent agent,
         Guid? sessionId,
@@ -40,7 +25,7 @@ public class AppShell
         CancellationToken ct = default)
     {
         _currentStream = "";
-        _chatStream.AddUser(input);
+        chatStream.AddUser(input);
 
         Guid? newSessionId = sessionId;
         string? errorMessage = null;
@@ -56,7 +41,6 @@ public class AppShell
             .Overflow(VerticalOverflow.Ellipsis)
             .StartAsync(async ctx =>
             {
-                // Стриминг в фоне — исключения складываем в errorMessage
                 var streamTask = Task.Run(async () =>
                 {
                     try
@@ -73,15 +57,14 @@ public class AppShell
 
                                 case ToolCallStarted started:
                                     isThinking = false;
-                                    _toolPanel.OnStarted(started);
+                                    toolPanel.OnStarted(started);
                                     break;
 
                                 case ToolCallCompleted completed:
-                                    _toolPanel.OnCompleted(completed);
+                                    toolPanel.OnCompleted(completed);
                                     break;
 
                                 case StatusEvent:
-                                    // статусы не отображаем в Live, чтобы не мешать
                                     break;
 
                                 case AgentCompleted done:
@@ -104,7 +87,6 @@ public class AppShell
                     }
                 }, ct);
 
-                // Обновляем Live, пока стриминг не завершится
                 while (!streamTask.IsCompleted || isThinking)
                 {
                     spinnerIndex = (spinnerIndex + 1) % spinnerChars.Length;
@@ -118,23 +100,20 @@ public class AppShell
                 stopwatch.Stop();
             });
 
-        // Сохраняем частичный ответ, если он был
         if (!string.IsNullOrEmpty(_currentStream))
         {
-            _chatStream.AddAssistant(_currentStream);
+            chatStream.AddAssistant(_currentStream);
             _currentStream = "";
         }
 
-        // ─── ФИНАЛЬНЫЙ РЕНДЕР (ошибка остаётся видимой) ───
         AnsiConsole.Clear();
-        AnsiConsole.Write(_statusBar.Build());
+        AnsiConsole.Write(statusBar.Build());
         AnsiConsole.Write(new Rule().RuleStyle("grey"));
-        AnsiConsole.Write(_chatStream.Build());
+        AnsiConsole.Write(chatStream.Build());
         AnsiConsole.WriteLine();
 
         if (!string.IsNullOrEmpty(errorMessage))
         {
-            // Постоянная панель с ошибкой — не стирается
             AnsiConsole.Write(new Panel(
                     new Markup($"[red]{Markup.Escape(errorMessage)}[/]"))
                 .Header("[red] ✗ Error [/]")
@@ -158,9 +137,9 @@ public class AppShell
     {
         var rows = new List<IRenderable>
         {
-            _statusBar.Build(),
+            statusBar.Build(),
             new Rule().RuleStyle("grey"),
-            _chatStream.Build()
+            chatStream.Build()
         };
 
         if (!string.IsNullOrEmpty(_currentStream))
@@ -176,7 +155,7 @@ public class AppShell
             rows.Add(new Markup($"[cyan]{spinner}[/] [grey]Sage is thinking...[/]"));
         }
 
-        var tools = _toolPanel.Build();
+        var tools = toolPanel.Build();
         if (tools is not Markup)
         {
             rows.Add(new Rule().RuleStyle("grey"));
@@ -199,22 +178,22 @@ public class AppShell
                 _currentStream += chunk.Text;
                 break;
             case ToolCallStarted started:
-                _toolPanel.OnStarted(started);
+                toolPanel.OnStarted(started);
                 break;
             case ToolCallCompleted completed:
-                _toolPanel.OnCompleted(completed);
+                toolPanel.OnCompleted(completed);
                 break;
             case StatusEvent status:
                 Footer.ShowStatus(status.Message);
                 break;
             case AgentCompleted:
-                _chatStream.AddAssistant(_currentStream);
+                chatStream.AddAssistant(_currentStream);
                 _currentStream = "";
                 break;
             case AgentFailed failed:
                 if (!string.IsNullOrEmpty(_currentStream))
                 {
-                    _chatStream.AddAssistant(_currentStream);
+                    chatStream.AddAssistant(_currentStream);
                     _currentStream = "";
                 }
                 Footer.ShowError(failed.Reason);
@@ -225,9 +204,9 @@ public class AppShell
     public void Refresh()
     {
         AnsiConsole.Clear();
-        AnsiConsole.Write(_statusBar.Build());
+        AnsiConsole.Write(statusBar.Build());
         AnsiConsole.Write(new Rule().RuleStyle("grey"));
-        AnsiConsole.Write(_chatStream.Build());
+        AnsiConsole.Write(chatStream.Build());
 
         if (!string.IsNullOrEmpty(_currentStream))
         {
@@ -237,7 +216,7 @@ public class AppShell
                 .RoundedBorder());
         }
 
-        var tools = _toolPanel.Build();
+        var tools = toolPanel.Build();
         if (tools is not Markup)
         {
             AnsiConsole.Write(new Rule().RuleStyle("grey"));

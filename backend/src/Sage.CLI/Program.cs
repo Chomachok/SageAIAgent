@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,7 +7,6 @@ using Sage.Core.DTOs;
 using Sage.Core.Events;
 using Sage.Infrastructure.Extensions;
 using Sage.CLI;
-using Sage.CLI.Repositories;
 using Sage.CLI.Rendering;
 using Sage.CLI.UI;
 using Sage.CLI.UI.Components;
@@ -17,11 +15,12 @@ using Spectre.Console;
 var llmConfig = ConfigLoader.LoadConfig(args);
 
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices((context, services) =>
+    .ConfigureServices((_, services) =>
     {
-        services.AddInfrastructure(llmConfig,
-            context.Configuration.GetConnectionString("DefaultConnection"));
-        services.AddScoped<ISessionRepository, InMemorySessionRepository>();
+        if (llmConfig != null)
+        {
+            services.AddInfrastructure(llmConfig);
+        }
         services.AddLogging(builder =>
         {
             builder.ClearProviders();
@@ -42,7 +41,6 @@ var appShell = new AppShell(statusBar, toolPanel, chatStream);
 var composer = new Composer();
 var markdownRenderer = new SpectreMarkdownRenderer();
 
-// ─── Single-shot mode ───
 if (args.Length > 0)
 {
     var query = string.Join(" ", args);
@@ -115,7 +113,6 @@ if (args.Length > 0)
     return;
 }
 
-// ─── Interactive mode ───
 AnsiConsole.Clear();
 AnsiConsole.Write(new FigletText("Sage").Color(Color.Cyan1).LeftJustified());
 AnsiConsole.MarkupLine("[grey]AI coding assistant. Type [cyan]/help[/] for commands.[/]");

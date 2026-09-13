@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -11,6 +12,7 @@ using Sage.Core.Configuration;
 using Sage.Core.DTOs;
 using Sage.Core.Entities;
 using Sage.Core.Events;
+using Sage.Infrastructure.Filters;
 using Sage.Infrastructure.Plugins;
 
 namespace Sage.Infrastructure.Agents;
@@ -19,50 +21,53 @@ public class SemanticKernelAgent : ICodingAgent
 {
     private readonly ISessionRepository _sessionRepository;
     private readonly Kernel _kernel;
+    private readonly Channel<AgentEvent> _toolEventChannel;
     private readonly string _systemPrompt;
     private readonly int _maxHistoryMessages;
     private readonly int _maxTokens;
     private readonly double _temperature;
     private const int MaxRetries = 5;
+    private const int DefaultMaxTokens = 800;
     private readonly ILogger<SemanticKernelAgent> _logger;
 
     public SemanticKernelAgent(
         ISessionRepository sessionRepository,
-        LlmConfig llmConfig,           
+        LlmConfig llmConfig,
+        ToolCallObserverFilter observerFilter,
+        Channel<AgentEvent> toolEventChannel,
         ILoggerFactory loggerFactory)
     {
         _sessionRepository = sessionRepository;
         _logger = loggerFactory.CreateLogger<SemanticKernelAgent>();
+        _toolEventChannel = toolEventChannel;
 
         _maxHistoryMessages = llmConfig.MaxHistoryMessages;
-        _maxTokens = llmConfig.MaxTokens;
+        _maxTokens = llmConfig.MaxTokens > 0 ? llmConfig.MaxTokens : DefaultMaxTokens;
         _temperature = llmConfig.Temperature;
-
-        if (string.IsNullOrWhiteSpace(llmConfig.Endpoint))
-            throw new InvalidOperationException("Endpoint is not configured in sage.config.json.");
-        if (string.IsNullOrWhiteSpace(llmConfig.ApiKey))
-            throw new InvalidOperationException("ApiKey is not configured in sage.config.json.");
-        if (string.IsNullOrWhiteSpace(llmConfig.ModelId))
-            throw new InvalidOperationException("ModelId is not configured in sage.config.json.");
 
         var builder = Kernel.CreateBuilder();
         builder.AddOpenAIChatCompletion(
             modelId: llmConfig.ModelId,
             endpoint: new Uri(llmConfig.Endpoint),
-            apiKey: llmConfig.ApiKey
-        );
+            apiKey: llmConfig.ApiKey);
+
+        builder.Services.AddSingleton<IFunctionInvocationFilter>(observerFilter);
 
         _kernel = builder.Build();
-        
-        var fileLogger = loggerFactory.CreateLogger<FileSystemPlugin>();
-        var filePlugin = new FileSystemPlugin(fileLogger, llmConfig.RootPath);
+
+        var filePlugin = new FileSystemPlugin(
+            loggerFactory.CreateLogger<FileSystemPlugin>(), llmConfig.RootPath);
         _kernel.Plugins.AddFromObject(filePlugin, "FileSystem");
 
         _systemPrompt = """
-            Ты — Sage, агент с функциями:
-            read_file, write_file, list_files.
-            Если пользователь просит что-то с файлами — вызывай функцию. Не объясняй. 
-            Отвечай только результатом функции.
+            You are Sage, an AI coding assistant with these tools:
+            - read_file(path)
+            - write_file(path, content)
+            - list_files(path)
+
+            When the user asks about files, call the appropriate tool.
+            Do not explain — return the result.
+            Keep answers concise.
             """;
     }
 
@@ -85,6 +90,8 @@ public class SemanticKernelAgent : ICodingAgent
             await _sessionRepository.CreateAsync(session, cancellationToken);
         }
 
+        while (_toolEventChannel.Reader.TryRead(out _)) { }
+
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(_systemPrompt);
 
@@ -102,7 +109,7 @@ public class SemanticKernelAgent : ICodingAgent
         var settings = new OpenAIPromptExecutionSettings
         {
             ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions,
-            MaxTokens = _maxTokens > 0 ? _maxTokens : null,
+            MaxTokens = _maxTokens,
             Temperature = _temperature,
             TopP = 0.9,
             FrequencyPenalty = 0.0,
@@ -112,56 +119,65 @@ public class SemanticKernelAgent : ICodingAgent
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
         var answerBuilder = new StringBuilder();
         var stopwatch = Stopwatch.StartNew();
-
-        var channel = Channel.CreateUnbounded<AgentEvent>();
+        var responseChannel = Channel.CreateUnbounded<AgentEvent>();
 
         _ = Task.Run(async () =>
         {
-            for (var attempt = 0; attempt < MaxRetries; attempt++)
+            try
             {
-                try
+                for (var attempt = 0; attempt < MaxRetries; attempt++)
                 {
-                    await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(
-                        chatHistory, settings, _kernel, cancellationToken))
+                    try
                     {
-                        if (string.IsNullOrEmpty(chunk.Content)) continue;
+                        await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(
+                                           chatHistory, settings, _kernel, cancellationToken))
+                        {
+                            while (_toolEventChannel.Reader.TryRead(out var toolEvt))
+                                await responseChannel.Writer.WriteAsync(toolEvt, cancellationToken);
 
-                        answerBuilder.Append(chunk.Content);
-                        await channel.Writer.WriteAsync(
-                            new TextChunkReceived(chunk.Content), cancellationToken);
+                            if (string.IsNullOrEmpty(chunk.Content)) continue;
+
+                            answerBuilder.Append(chunk.Content);
+                            await responseChannel.Writer.WriteAsync(
+                                new TextChunkReceived(chunk.Content), cancellationToken);
+                        }
+
+                        while (_toolEventChannel.Reader.TryRead(out var toolEvt))
+                            await responseChannel.Writer.WriteAsync(toolEvt, cancellationToken);
+
+                        responseChannel.Writer.Complete();
+                        return;
                     }
+                    catch (HttpOperationException ex) when (ex.Message.Contains("429"))
+                    {
+                        var delay = (int)Math.Pow(2, attempt + 1) * 1000;
+                        _logger.LogWarning(
+                            "Rate limit (429). Retry {Attempt}/{Max} in {Delay}ms",
+                            attempt + 1, MaxRetries, delay);
 
-                    channel.Writer.Complete();
-                    return;
-                }
-                catch (HttpOperationException ex) when (ex.Message.Contains("429"))
-                {
-                    var delay = (int)Math.Pow(2, attempt + 1) * 1000;
-                    _logger.LogWarning(
-                        "Rate limit (429). Retry {Attempt}/{Max} in {Delay}ms",
-                        attempt + 1, MaxRetries, delay);
+                        await responseChannel.Writer.WriteAsync(
+                            new StatusEvent($"Retry {attempt + 1}/{MaxRetries} in {delay / 1000}s..."),
+                            cancellationToken);
 
-                    await channel.Writer.WriteAsync(
-                        new StatusEvent($"⏳ Retry {attempt + 1}/{MaxRetries} in {delay / 1000}s..."),
-                        cancellationToken);
+                        await Task.Delay(delay, cancellationToken);
+                    }
+                }
 
-                    await Task.Delay(delay, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Streaming failed");
-                    await channel.Writer.WriteAsync(new AgentFailed(ex.Message), cancellationToken);
-                    channel.Writer.Complete();
-                    return;
-                }
+                responseChannel.Writer.TryComplete(
+                    new Exception("Rate limit exceeded after retries."));
             }
-
-            await channel.Writer.WriteAsync(
-                new AgentFailed("Rate limit exceeded after retries."), cancellationToken);
-            channel.Writer.Complete();
+            catch (OperationCanceledException)
+            {
+                responseChannel.Writer.TryComplete();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Streaming failed");
+                responseChannel.Writer.TryComplete(ex);
+            }
         }, cancellationToken);
 
-        await foreach (var evt in channel.Reader.ReadAllAsync(cancellationToken))
+        await foreach (var evt in responseChannel.Reader.ReadAllAsync(cancellationToken))
         {
             yield return evt;
         }

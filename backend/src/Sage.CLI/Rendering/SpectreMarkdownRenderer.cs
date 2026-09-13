@@ -37,8 +37,6 @@ public class SpectreMarkdownRenderer
     {
         var result = new List<IRenderable>();
 
-        // 🔑 ВАЖНО: сначала проверяем более специфичные типы (HeadingBlock, CodeBlock),
-        // потому что они наследуются от LeafBlock.
         if (node is HeadingBlock heading)
         {
             result.Add(RenderHeading(heading));
@@ -70,7 +68,6 @@ public class SpectreMarkdownRenderer
         }
         else if (node is LeafBlock leaf && leaf.Inline != null)
         {
-            // Обычный параграф: собираем весь инлайн в одну строку
             var markup = ProcessInlineToMarkup(leaf.Inline);
             if (!string.IsNullOrWhiteSpace(markup))
                 result.Add(new Markup(markup));
@@ -89,9 +86,6 @@ public class SpectreMarkdownRenderer
         return result;
     }
 
-    /// <summary>
-    /// Преобразует инлайн-дерево Markdig в строку Spectre markup.
-    /// </summary>
     private string ProcessInlineToMarkup(Inline inline)
     {
         var sb = new StringBuilder();
@@ -99,12 +93,13 @@ public class SpectreMarkdownRenderer
         return sb.ToString().TrimEnd();
     }
 
-    private void BuildMarkup(Inline inline, StringBuilder sb)
+    private void BuildMarkup(Inline? inline, StringBuilder sb)
     {
-        if (inline == null) return;
+        if (inline == null)
+        {
+            return;
+        }
 
-        // 🔑 ВАЖНО: специфичные типы (EmphasisInline, LinkInline) проверяем
-        // ДО ContainerInline, потому что они от него наследуются.
         switch (inline)
         {
             case EmphasisInline emphasis:
@@ -146,7 +141,6 @@ public class SpectreMarkdownRenderer
 
     private IRenderable RenderHeading(HeadingBlock heading)
     {
-        // Рендерим инлайн содержимое заголовка (чтобы поддержать **bold** и т.д.)
         var content = heading.Inline != null
             ? ProcessInlineToMarkup(heading.Inline)
             : Markup.Escape(heading.ToString() ?? "");
@@ -177,7 +171,6 @@ public class SpectreMarkdownRenderer
         {
             if (item is ListItemBlock li)
             {
-                // Собираем содержимое элемента списка в одну markup-строку
                 var innerMarkup = new StringBuilder();
 
                 void Traverse(MarkdownObject node)
@@ -238,7 +231,7 @@ public class SpectreMarkdownRenderer
 
     private IRenderable RenderTable(MarkdownTable table)
     {
-        var spectreTable = new Spectre.Console.Table();
+        var spectreTable = new Table();
         if (table.Count == 0) return new Text("");
 
         if (table[0] is MarkdownTableRow headerRow)
